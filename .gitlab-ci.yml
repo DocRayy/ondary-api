@@ -1,0 +1,61 @@
+# Recheck this file when using this template
+workflow:
+  rules:
+    - if: '$CI_COMMIT_REF_NAME == "main"'
+    - if: '$CI_COMMIT_REF_NAME == "development"'
+    - when: never
+
+stages:
+  - production
+
+variables:
+  VARIABLE_DATA: Gitlab-CI-YAML
+
+production:
+  stage: production
+  image: docker:23-dind
+  when: on_success
+  services:
+    - name: docker:23-dind
+      alias: docker
+      command: ["--tls=false"]
+  variables:
+    DEPLOY_TAG: "latest"
+    DOCKER_DRIVER: overlay
+    DOCKER_HOST: tcp://docker:2375/
+    DOCKER_TLS_CERTDIR: ""
+  tags:
+    - deployment
+  rules:
+    - if: $CI_COMMIT_REF_NAME == 'main'
+      variables:
+        DEPLOY_TAG: "latest"
+      when: manual
+    - if: $CI_COMMIT_REF_NAME == 'development'
+      variables:
+        DEPLOY_TAG: "latest"
+      when: manual
+    - if: $CI_COMMIT_REF_NAME != 'main' && $CI_COMMIT_REF_NAME != 'development'
+      when: never
+  before_script:
+    # login to gitlab registry
+    - echo $FOLXCODE_PERSONAL_TOKEN | docker login --username "$CI_REGISTRY_USER" --password-stdin $CI_REGISTRY
+    - docker build -t $CI_REGISTRY_IMAGE:$DEPLOY_TAG .
+    - docker push $CI_REGISTRY_IMAGE:$DEPLOY_TAG
+    # install ssh package and add private key to .ssh
+    - "command -v ssh-agent >/dev/null || ( apt-get update -y && apt-get install openssh-client -y )"
+  script:
+    - eval $(ssh-agent -s)
+    - echo "$LEVIATHAN_PRIVATE_KEY" | tr -d '\r' | ssh-add -
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
+    - ssh-keyscan $FC_LEVIATHAN_SERVER_ADDRESS >> ~/.ssh/known_hosts
+    - chmod 644 ~/.ssh/known_hosts
+    - >
+      ssh $SERVER_USERNAME@$FC_LEVIATHAN_SERVER_ADDRESS
+      "cd /home/ubuntu/gitlab/fc-leviathan;
+       echo $FOLXCODE_PERSONAL_TOKEN | sudo docker login --username "$CI_REGISTRY_USER" --password-stdin $CI_REGISTRY;
+       sudo docker pull $CI_REGISTRY_IMAGE:$DEPLOY_TAG;
+       sudo docker-compose -f docker-compose.yaml -f apps/grayce/docker-compose.yaml up -d --force-recreate grayce-api;
+       exit"
+    - docker logout
