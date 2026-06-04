@@ -19,6 +19,7 @@ import {
   generatePdf,
   normalizeReportMonth,
   type TaskReportPdfData,
+  type TaskReportRow,
 } from '../../cores/helpers/pdf-helper';
 import {
   TASK_CREATED_EVENT,
@@ -36,6 +37,8 @@ export class TaskService {
     private readonly taskRepository: Repository<TaskEntity>,
     @InjectRepository(TaskTodoEntity)
     private readonly taskTodosRepository: Repository<TaskTodoEntity>,
+    @InjectRepository(TimelogEntity)
+    private readonly timelogsRepository: Repository<TimelogEntity>,
     @InjectRepository(UserEntity)
     private readonly userRepository: Repository<UserEntity>,
     private readonly dataSource: DataSource,
@@ -178,9 +181,33 @@ export class TaskService {
       );
     }
 
+    const timelogs = this.timelogsRepository
+      .createQueryBuilder('timelog')
+      .leftJoinAndSelect('timelog.user', 'timelogUser')
+      .where('timelog.task_todo_id IS NULL')
+      .andWhere(
+        `(
+          (timelog.start >= :startDate AND timelog.start < :endDate)
+          OR (timelog.end >= :startDate AND timelog.end < :endDate)
+          OR (timelog.created_at >= :startDate AND timelog.created_at < :endDate)
+          OR (timelog.updated_at >= :startDate AND timelog.updated_at < :endDate)
+        )`,
+        {
+          startDate: reportMonth.startDate,
+          endDate: reportMonth.endDate,
+        },
+      )
+      .orderBy('timelog.created_at', 'DESC')
+      .addOrderBy('timelog.id', 'DESC');
+
+    if (filters.type) {
+      timelogs.andWhere('timelog.status = :type', { type: filters.type });
+    }
+
     const data = this.buildTaskReportData(
       await taskTodos.getMany(),
       reportMonth,
+      await timelogs.getMany(),
     );
     const filename = `task-report-${reportMonth.year}-${String(
       reportMonth.month,
@@ -397,77 +424,106 @@ export class TaskService {
   private buildTaskReportData(
     taskTodos: TaskTodoEntity[],
     reportMonth: ReturnType<typeof normalizeReportMonth>,
+    timelogs: TimelogEntity[] = [],
   ): TaskReportPdfData {
-    const rows = [...taskTodos]
-      .sort(
-        (first, second) =>
-          this.getReportRowDate(
-            first,
-            reportMonth.startDate,
-            reportMonth.endDate,
-          ).getTime() -
-          this.getReportRowDate(
-            second,
-            reportMonth.startDate,
-            reportMonth.endDate,
-          ).getTime(),
-      )
-      .map((todo) => {
-        const timeSpendMinutes = (todo.timelogs ?? []).reduce(
-          (total, timelog) => total + this.getTimelogMinutes(timelog),
-          0,
-        );
-        const completedDate =
-          todo.finish_date ?? todo.task?.completed_at ?? null;
-        const reportRowDate = this.getReportRowDate(
+    const rows = [
+      ...taskTodos.map((todo) =>
+        this.buildTodoReportRow(
           todo,
           reportMonth.startDate,
           reportMonth.endDate,
-        );
-        const isCompleted =
-          this.isDateInRange(
-            completedDate,
-            reportMonth.startDate,
-            reportMonth.endDate,
-          ) &&
-          (todo.progress >= 100 ||
-            ['finish', 'finished', 'completed'].includes(todo.status));
-
-        return {
-          assignee: todo.user?.name || todo.user?.username || 'Unassigned',
-          todo: todo.label,
-          status: todo.status,
-          created: this.isDateInRange(
-            todo.created_at,
-            reportMonth.startDate,
-            reportMonth.endDate,
-          )
-            ? 1
-            : 0,
-          completed: isCompleted ? 1 : 0,
-          project: todo.task?.project?.label ?? '-',
-          timeSpendMinutes,
-          createdAt: this.formatReportDateTime(todo.created_at),
-          groupWeek: this.getWeekOfMonth(reportRowDate),
-          groupDay: this.formatReportDay(reportRowDate),
-        };
-      });
+        ),
+      ),
+      ...timelogs.map((timelog) =>
+        this.buildTimelogReportRow(
+          timelog,
+          reportMonth.startDate,
+          reportMonth.endDate,
+        ),
+      ),
+    ].sort(
+      (first, second) =>
+        first.reportDate.getTime() - second.reportDate.getTime(),
+    );
+    const reportRows = rows.map(({ reportDate: _reportDate, ...row }) => row);
     const projectNames = new Set(
-      rows.map((row) => row.project).filter((project) => project !== '-'),
+      reportRows.map((row) => row.project).filter((project) => project !== '-'),
     );
 
     return {
       month: reportMonth.month,
       year: reportMonth.year,
       monthName: reportMonth.monthName,
-      totalTimeSpendMinutes: rows.reduce(
+      totalTimeSpendMinutes: reportRows.reduce(
         (total, row) => total + row.timeSpendMinutes,
         0,
       ),
-      totalTodos: rows.length,
+      totalTodos: reportRows.length,
       totalProjects: projectNames.size,
-      totalCompleted: rows.reduce((total, row) => total + row.completed, 0),
-      rows,
+      totalCompleted: reportRows.reduce(
+        (total, row) => total + row.completed,
+        0,
+      ),
+      rows: reportRows,
+    };
+  }
+
+  private buildTodoReportRow(
+    todo: TaskTodoEntity,
+    startDate: Date,
+    endDate: Date,
+  ): TaskReportRow & { reportDate: Date } {
+    const timeSpendMinutes = (todo.timelogs ?? []).reduce(
+      (total, timelog) => total + this.getTimelogMinutes(timelog),
+      0,
+    );
+    const completedDate = todo.finish_date ?? todo.task?.completed_at ?? null;
+    const reportDate = this.getReportRowDate(todo, startDate, endDate);
+    const isCompleted =
+      this.isDateInRange(completedDate, startDate, endDate) &&
+      (todo.progress >= 100 ||
+        ['finish', 'finished', 'completed'].includes(todo.status));
+
+    return {
+      assignee: todo.user?.name || todo.user?.username || 'Unassigned',
+      todo: todo.label,
+      status: todo.status,
+      created: this.isDateInRange(todo.created_at, startDate, endDate) ? 1 : 0,
+      completed: isCompleted ? 1 : 0,
+      project: todo.task?.project?.label ?? '-',
+      timeSpendMinutes,
+      createdAt: this.formatReportDateTime(todo.created_at),
+      groupWeek: this.getWeekOfMonth(reportDate),
+      groupDay: this.formatReportDay(reportDate),
+      reportDate,
+    };
+  }
+
+  private buildTimelogReportRow(
+    timelog: TimelogEntity,
+    startDate: Date,
+    endDate: Date,
+  ): TaskReportRow & { reportDate: Date } {
+    const reportDate = this.getTimelogReportDate(timelog, startDate, endDate);
+
+    return {
+      assignee: timelog.user?.name || timelog.user?.username || 'Unassigned',
+      todo: timelog.name,
+      status: timelog.status,
+      created: this.isDateInRange(timelog.created_at, startDate, endDate)
+        ? 1
+        : 0,
+      completed:
+        this.isDateInRange(timelog.end, startDate, endDate) ||
+        ['finish', 'finished', 'completed', 'done'].includes(timelog.status)
+          ? 1
+          : 0,
+      project: '-',
+      timeSpendMinutes: this.getTimelogMinutes(timelog),
+      createdAt: this.formatReportDateTime(timelog.created_at),
+      groupWeek: this.getWeekOfMonth(reportDate),
+      groupDay: this.formatReportDay(reportDate),
+      reportDate,
     };
   }
 
@@ -541,6 +597,21 @@ export class TaskService {
       todo.finish_date ??
       todo.task?.completed_at ??
       todo.created_at
+    );
+  }
+
+  private getTimelogReportDate(
+    timelog: TimelogEntity,
+    startDate: Date,
+    endDate: Date,
+  ) {
+    return (
+      [timelog.start, timelog.end, timelog.created_at, timelog.updated_at]
+        .filter((date): date is Date =>
+          this.isDateInRange(date, startDate, endDate),
+        )
+        .sort((first, second) => first.getTime() - second.getTime())[0] ??
+      timelog.created_at
     );
   }
 

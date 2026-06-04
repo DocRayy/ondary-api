@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import {
   TaskEntity,
   TaskTodoEntity,
+  TimelogEntity,
   UserEntity,
 } from '../../database/entities';
 import { RealtimeModule } from '../realtime/realtime.module';
@@ -11,7 +12,12 @@ import { TaskService } from './task.service';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([TaskEntity, TaskTodoEntity, UserEntity]),
+    TypeOrmModule.forFeature([
+      TaskEntity,
+      TaskTodoEntity,
+      TimelogEntity,
+      UserEntity,
+    ]),
     RealtimeModule,
   ],
   controllers: [TaskController],
