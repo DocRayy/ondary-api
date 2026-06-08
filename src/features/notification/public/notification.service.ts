@@ -8,7 +8,12 @@ import {
   successResponse,
 } from '../../../common/responses/api-response.util';
 import { removePasswords } from '../../../common/serialization/remove-passwords.util';
-import { TaskEntity, UserEntity } from '../../../database/entities';
+import {
+  ManagerNoteEntity,
+  TaskEntity,
+  TaskTodoEntity,
+  UserEntity,
+} from '../../../database/entities';
 import { NotificationEntity } from '../entities/notification.entity';
 import { CreateNotificationRequest } from '../dto/create-notification.dto';
 import type { AuthenticatedUser } from '../../auth/types/authenticated-user.type';
@@ -56,7 +61,12 @@ export class NotificationService {
     if (this.canReadAll(user)) {
       return this.notificationRepository
         .find({
-          relations: { task: { user: true }, user: true },
+          relations: {
+            task: { user: true },
+            taskTodo: { user: true },
+            managerNote: true,
+            user: true,
+          },
           order: { created_at: 'DESC' },
         })
         .then((notifications) =>
@@ -71,7 +81,12 @@ export class NotificationService {
     return this.notificationRepository
       .find({
         where: { user_id: user.id },
-        relations: { task: { user: true }, user: true },
+        relations: {
+          task: { user: true },
+          taskTodo: { user: true },
+          managerNote: true,
+          user: true,
+        },
         order: { created_at: 'DESC' },
       })
       .then((notifications) =>
@@ -83,11 +98,39 @@ export class NotificationService {
       );
   }
 
+  async createForTaskTodoCreated(taskTodo: TaskTodoEntity, task: TaskEntity) {
+    if (!taskTodo.user_id) {
+      return [];
+    }
+
+    return this.createForUsers([taskTodo.user_id], {
+      type: 'task_todo_created',
+      task_id: task.id,
+      task_todo_id: taskTodo.id,
+      title: 'New Task Todo',
+      message: `Todo "${taskTodo.label}" was added to task "${task.title}".`,
+    });
+  }
+
+  async createForManagerNoteCreated(managerNote: ManagerNoteEntity) {
+    return this.createForUsers([managerNote.user_id], {
+      type: 'manager_note_created',
+      manager_note_id: managerNote.id,
+      title: 'New Manager Note',
+      message: `Manager note "${managerNote.title}" was created for you.`,
+    });
+  }
+
   findMine(user: AuthenticatedUser) {
     return this.notificationRepository
       .find({
         where: { user_id: user.id },
-        relations: { task: { user: true }, user: true },
+        relations: {
+          task: { user: true },
+          taskTodo: { user: true },
+          managerNote: true,
+          user: true,
+        },
         order: { created_at: 'DESC' },
       })
       .then((notifications) =>
@@ -102,7 +145,12 @@ export class NotificationService {
   async findOne(id: number, user: AuthenticatedUser) {
     const notification = await this.notificationRepository.findOne({
       where: this.canReadAll(user) ? { id } : { id, user_id: user.id },
-      relations: { task: { user: true }, user: true },
+      relations: {
+        task: { user: true },
+        taskTodo: { user: true },
+        managerNote: true,
+        user: true,
+      },
     });
 
     if (!notification) {
@@ -135,6 +183,7 @@ export class NotificationService {
   async handleTaskCreated(payload: TaskCreatedEvent) {
     const task = await this.findTask(payload.task_id);
     return this.createForTaskStatus(task, {
+      type: 'task_created',
       title: 'New Task',
       message: `Task "${task.title}" created with status ${task.status}.`,
     });
@@ -162,26 +211,57 @@ export class NotificationService {
 
   private async createForTaskStatus(
     task: TaskEntity,
-    override?: { title?: string; message?: string },
+    override?: { title?: string; message?: string; type?: string },
   ) {
     const recipientIds = await this.getTaskRecipientIds(task);
     if (recipientIds.length === 0) {
       return [];
     }
 
+    return this.createForUsers(recipientIds, {
+      type: override?.type ?? 'task_status_updated',
+      task_id: task.id,
+      title: override?.title ?? 'Task Status Updated',
+      message:
+        override?.message ?? `Task "${task.title}" is currently ${task.status}.`,
+    });
+  }
+
+  private async createForUsers(
+    recipientIds: number[],
+    payload: {
+      type: string;
+      title: string;
+      message: string;
+      task_id?: number | null;
+      task_todo_id?: number | null;
+      manager_note_id?: number | null;
+    },
+  ) {
+    const uniqueRecipientIds = [
+      ...new Set(
+        recipientIds.filter((userId) => Number.isInteger(userId) && userId > 0),
+      ),
+    ];
+
+    if (uniqueRecipientIds.length === 0) {
+      return [];
+    }
+
     const users = await this.userRepository.find({
-      where: { id: In(recipientIds) },
+      where: { id: In(uniqueRecipientIds) },
       select: { id: true },
     });
 
     const notifications = users.map((user) =>
       this.notificationRepository.create({
-        task_id: task.id,
+        task_id: payload.task_id ?? null,
+        task_todo_id: payload.task_todo_id ?? null,
+        manager_note_id: payload.manager_note_id ?? null,
         user_id: user.id,
-        title: override?.title ?? 'Task Status Updated',
-        message:
-          override?.message ??
-          `Task "${task.title}" is currently ${task.status}.`,
+        type: payload.type,
+        title: payload.title,
+        message: payload.message,
         is_read: false,
       }),
     );

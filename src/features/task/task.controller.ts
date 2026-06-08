@@ -15,6 +15,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import {
   CreateTaskRequest,
+  FindTasksQuery,
   MoveTaskRequest,
   TaskIdParam,
   UpdateTaskRequest,
@@ -35,8 +36,8 @@ export class TaskController {
   }
 
   @Get()
-  findAll(@Query('user_id') userId?: string) {
-    return this.taskService.findAll(userId ? Number(userId) : undefined);
+  findAll(@Query() query: FindTasksQuery) {
+    return this.taskService.findAll(query);
   }
 
   @Get('report/pdf')

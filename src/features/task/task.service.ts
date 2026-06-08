@@ -28,7 +28,12 @@ import {
   TaskStatusUpdatedEvent,
 } from '../notification/public/notification.service';
 import { RealtimeService } from '../realtime/realtime.service';
-import { CreateTaskRequest, MoveTaskRequest, UpdateTaskRequest } from './dto';
+import {
+  CreateTaskRequest,
+  FindTasksQuery,
+  MoveTaskRequest,
+  UpdateTaskRequest,
+} from './dto';
 
 @Injectable()
 export class TaskService {
@@ -81,9 +86,10 @@ export class TaskService {
     );
   }
 
-  async findAll(userId?: number) {
+  async findAll(filters: FindTasksQuery = {}) {
     const query = this.taskRepository
       .createQueryBuilder('task')
+      .leftJoinAndSelect('task.project', 'project')
       .leftJoinAndSelect('task.user', 'user')
       .leftJoinAndSelect('task.createdBy', 'createdBy')
       .leftJoinAndSelect('task.updatedBy', 'updatedBy')
@@ -91,15 +97,42 @@ export class TaskService {
       .orderBy('task.order_index', 'ASC')
       .addOrderBy('task.id', 'DESC');
 
-    if (userId && Number.isInteger(userId)) {
+    if (filters.user_id) {
       query.where(
         `(task.user_id = :userId
           OR JSON_CONTAINS(task.assignee_user_ids, :assigneeUserId)
           OR JSON_CONTAINS(task.assignee_user_ids, :assigneeUserIdAsString))`,
         {
-          userId,
-          assigneeUserId: String(userId),
-          assigneeUserIdAsString: JSON.stringify(String(userId)),
+          userId: filters.user_id,
+          assigneeUserId: String(filters.user_id),
+          assigneeUserIdAsString: JSON.stringify(String(filters.user_id)),
+        },
+      );
+    }
+
+    if (filters.project_id) {
+      query.andWhere('task.project_id = :projectId', {
+        projectId: filters.project_id,
+      });
+    }
+
+    if (filters.month || filters.year) {
+      const reportMonth = normalizeReportMonth(
+        filters.month?.toString(),
+        filters.year?.toString(),
+      );
+      query.andWhere(
+        `(
+          (task.created_at >= :startDate AND task.created_at < :endDate)
+          OR (task.updated_at >= :startDate AND task.updated_at < :endDate)
+          OR (task.due_date >= :startDate AND task.due_date < :endDate)
+          OR (task.finish_date >= :startDate AND task.finish_date < :endDate)
+          OR (task.completed_at >= :startDate AND task.completed_at < :endDate)
+          OR (task.moved_at >= :startDate AND task.moved_at < :endDate)
+        )`,
+        {
+          startDate: reportMonth.startDate,
+          endDate: reportMonth.endDate,
         },
       );
     }
@@ -116,6 +149,7 @@ export class TaskService {
       where: { id },
       relations: {
         user: true,
+        project: true,
         createdBy: true,
         updatedBy: true,
         taskTodo: { user: true },

@@ -12,6 +12,7 @@ import {
 } from '../../common/responses/api-response.util';
 import { removePasswords } from '../../common/serialization/remove-passwords.util';
 import { ManagerNoteEntity, UserEntity } from '../../database/entities';
+import { NotificationService } from '../notification/public/notification.service';
 import { CreateManagerNoteRequest, UpdateManagerNoteRequest } from './dto';
 
 const MANAGER_NOTE_RECIPIENT_ROLES = ['member', 'admin'];
@@ -23,6 +24,7 @@ export class ManagerNotesService {
     private readonly managerNotesRepository: Repository<ManagerNoteEntity>,
     @InjectRepository(UserEntity)
     private readonly usersRepository: Repository<UserEntity>,
+    private readonly notificationService: NotificationService,
   ) {}
 
   async create(payload: CreateManagerNoteRequest) {
@@ -31,6 +33,8 @@ export class ManagerNotesService {
     const managerNote = await this.managerNotesRepository.save(
       this.managerNotesRepository.create(payload),
     );
+    await this.notificationService.createForManagerNoteCreated(managerNote);
+
     return successResponse(
       'Manager Note Created',
       'Manager note created successfully',

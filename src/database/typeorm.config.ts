@@ -15,6 +15,7 @@ import { TimelogStatus1712920000008 } from './migrations/1712920000008-timelog-s
 import { TaskProgress1712920000009 } from './migrations/1712920000009-task-progress';
 import { UploadPhotoAndProjectTimestamps1712920000010 } from './migrations/1712920000010-upload-photo-and-project-timestamps';
 import { TimelogTimestamps1712920000011 } from './migrations/1712920000011-timelog-timestamps';
+import { GeneralNotifications1712920000012 } from './migrations/1712920000012-general-notifications';
 
 loadEnv();
 
@@ -56,6 +57,7 @@ export const typeOrmOptions: TypeOrmModuleOptions = {
     TaskProgress1712920000009,
     UploadPhotoAndProjectTimestamps1712920000010,
     TimelogTimestamps1712920000011,
+    GeneralNotifications1712920000012,
   ],
   synchronize: process.env.DB_SYNCHRONIZE === 'true',
   logging: process.env.DB_LOGGING === 'true',

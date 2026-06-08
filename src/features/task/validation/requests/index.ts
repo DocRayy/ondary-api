@@ -4,6 +4,7 @@ import {
   IsArray,
   IsIn,
   IsInt,
+  Max,
   IsOptional,
   IsString,
   MaxLength,
@@ -11,6 +12,33 @@ import {
 } from 'class-validator';
 
 export const TASK_STATUSES = ['draft', 'progress', 'on_hold', 'completed'];
+
+export class FindTasksQuery {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  user_id?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  project_id?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(12)
+  month?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1901)
+  year?: number;
+}
 
 export class CreateTaskRequest {
   @Type(() => Number)

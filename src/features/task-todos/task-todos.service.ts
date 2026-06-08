@@ -12,6 +12,7 @@ import {
 } from '../../common/responses/api-response.util';
 import { removePasswords } from '../../common/serialization/remove-passwords.util';
 import { TaskEntity, TaskTodoEntity } from '../../database/entities';
+import { NotificationService } from '../notification/public/notification.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { CreateTaskTodoRequest, UpdateTaskTodoRequest } from './dto';
 
@@ -23,6 +24,7 @@ export class TaskTodosService {
     @InjectRepository(TaskEntity)
     private readonly taskRepository: Repository<TaskEntity>,
     private readonly realtimeService: RealtimeService,
+    private readonly notificationService: NotificationService,
   ) {}
 
   async create(payload: CreateTaskTodoRequest) {
@@ -42,6 +44,7 @@ export class TaskTodosService {
       await this.taskRepository.update(task.id, { task_todo_id: taskTodo.id });
     }
     await this.syncTaskProgress(taskTodo.task_id);
+    await this.notificationService.createForTaskTodoCreated(taskTodo, task);
 
     return successResponse(
       'Task Todo Created',
