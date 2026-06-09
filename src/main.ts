@@ -4,7 +4,10 @@ import { AppModule } from './app.module';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-  const corsOrigins = (process.env.CORS_ORIGINS ?? 'http://localhost:4200')
+  const corsOrigins = (
+    process.env.CORS_ORIGINS ??
+    'http://localhost:4200,https://ondary.netlify.app'
+  )
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean);
