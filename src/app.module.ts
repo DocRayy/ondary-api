@@ -17,14 +17,24 @@ import { featureModules } from './features';
     }),
     EventEmitterModule.forRoot(),
     TypeOrmModule.forRoot(typeOrmOptions),
-    ServeStaticModule.forRoot({
-      rootPath: join(__dirname, '..', 'storage'),
-      serveRoot: '/',
-      serveStaticOptions: {
-        index: false,
-        fallthrough: false,
+    ServeStaticModule.forRoot(
+      {
+        rootPath: join(__dirname, '..', 'storage', 'uploads'),
+        serveRoot: '/uploads',
+        serveStaticOptions: {
+          index: false,
+          fallthrough: false,
+        },
       },
-    }),
+      {
+        rootPath: join(__dirname, '..', 'storage', 'downloads'),
+        serveRoot: '/downloads',
+        serveStaticOptions: {
+          index: false,
+          fallthrough: false,
+        },
+      },
+    ),
     ...featureModules,
   ],
   controllers: [AppController],
