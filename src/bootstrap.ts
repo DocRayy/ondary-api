@@ -1,6 +1,7 @@
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
+import helmet from 'helmet';
 
 export async function createApp() {
   const app = await NestFactory.create(AppModule);
@@ -31,6 +32,12 @@ export async function createApp() {
       transform: true,
       whitelist: true,
       forbidNonWhitelisted: true,
+    }),
+  );
+
+  app.use(
+    helmet({
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
     }),
   );
 

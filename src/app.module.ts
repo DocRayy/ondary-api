@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -8,6 +8,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { typeOrmOptions } from './database/typeorm.config';
 import { featureModules } from './features';
+import { XssMiddleware } from './Middleware';
 
 @Module({
   imports: [
@@ -19,19 +20,39 @@ import { featureModules } from './features';
     TypeOrmModule.forRoot(typeOrmOptions),
     ServeStaticModule.forRoot(
       {
-        rootPath: join(__dirname, '..', 'storage', 'uploads'),
+        rootPath: join(process.cwd(), 'storage', 'uploads'),
         serveRoot: '/uploads',
         serveStaticOptions: {
           index: false,
           fallthrough: false,
+          setHeaders: (res) => {
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+          },
         },
       },
       {
-        rootPath: join(__dirname, '..', 'storage', 'downloads'),
+        rootPath: join(process.cwd(), 'storage', 'uploads'),
+        serveRoot: '/storage/uploads',
+        serveStaticOptions: {
+          index: false,
+          fallthrough: false,
+          setHeaders: (res) => {
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+          },
+        },
+      },
+      {
+        rootPath: join(process.cwd(), 'storage', 'downloads'),
         serveRoot: '/downloads',
         serveStaticOptions: {
           index: false,
           fallthrough: false,
+          setHeaders: (res) => {
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+          },
         },
       },
     ),
@@ -40,4 +61,8 @@ import { featureModules } from './features';
   controllers: [AppController],
   providers: [AppService],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(XssMiddleware).forRoutes('*'); // apply ke semua route
+  }
+}

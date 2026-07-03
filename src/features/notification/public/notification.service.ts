@@ -98,12 +98,22 @@ export class NotificationService {
       );
   }
 
-  async createForTaskTodoCreated(taskTodo: TaskTodoEntity, task: TaskEntity) {
-    if (!taskTodo.user_id) {
+  async createForTaskTodoCreated(
+    taskTodo: TaskTodoEntity,
+    task: TaskEntity,
+    recipientIds?: number[],
+  ) {
+    const todoRecipientIds = recipientIds?.length
+      ? recipientIds
+      : taskTodo.user_id
+        ? [taskTodo.user_id]
+        : [];
+
+    if (todoRecipientIds.length === 0) {
       return [];
     }
 
-    return this.createForUsers([taskTodo.user_id], {
+    return this.createForUsers(todoRecipientIds, {
       type: 'task_todo_created',
       task_id: task.id,
       task_todo_id: taskTodo.id,
@@ -118,6 +128,15 @@ export class NotificationService {
       manager_note_id: managerNote.id,
       title: 'New Manager Note',
       message: `Manager note "${managerNote.title}" was created for you.`,
+    });
+  }
+
+  async createForTaskCommentMention(task: TaskEntity, recipientIds: number[]) {
+    return this.createForUsers(recipientIds, {
+      type: 'task_comment_mention',
+      task_id: task.id,
+      title: 'Task Comment Mention',
+      message: `You were mentioned in a comment on task "${task.title}".`,
     });
   }
 
@@ -223,7 +242,8 @@ export class NotificationService {
       task_id: task.id,
       title: override?.title ?? 'Task Status Updated',
       message:
-        override?.message ?? `Task "${task.title}" is currently ${task.status}.`,
+        override?.message ??
+        `Task "${task.title}" is currently ${task.status}.`,
     });
   }
 

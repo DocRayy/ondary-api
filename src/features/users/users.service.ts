@@ -8,6 +8,7 @@ import {
 } from '../../common/responses/api-response.util';
 import { removePasswords } from '../../common/serialization/remove-passwords.util';
 import { hashPassword } from '../../common/security/password.util';
+import { withPhotoUrl } from '../../common/uploads/media-url.util';
 import {
   uploadedPhotoUrl,
   UploadedPhoto,
@@ -34,7 +35,7 @@ export class UsersService {
     return successResponse(
       'User Created',
       'User created successfully',
-      removePasswords(user),
+      withPhotoUrl(removePasswords(user)),
     );
   }
 
@@ -47,7 +48,6 @@ export class UsersService {
           taskTodos: true,
           timelogs: true,
           stickyNotes: true,
-          managerNotes: true,
         },
         order: { id: 'DESC' },
       })
@@ -55,7 +55,7 @@ export class UsersService {
         successResponse(
           'Users Retrieved',
           'Users retrieved successfully',
-          removePasswords(users),
+          withPhotoUrl(removePasswords(users)),
         ),
       );
   }
@@ -69,7 +69,6 @@ export class UsersService {
         taskTodos: true,
         timelogs: true,
         stickyNotes: true,
-        managerNotes: true,
       },
     });
     if (!user) {
@@ -81,7 +80,7 @@ export class UsersService {
     return successResponse(
       'User Retrieved',
       'User retrieved successfully',
-      removePasswords(user),
+      withPhotoUrl(removePasswords(user)),
     );
   }
 

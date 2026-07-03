@@ -38,6 +38,12 @@ export class FindTasksQuery {
   @IsInt()
   @Min(1901)
   year?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  recently_updated_days?: number;
 }
 
 export class CreateTaskRequest {

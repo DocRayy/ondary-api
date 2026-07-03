@@ -6,9 +6,7 @@ import {
   TableIndex,
 } from 'typeorm';
 
-export class GeneralNotifications1712920000012
-  implements MigrationInterface
-{
+export class GeneralNotifications1712920000012 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
     await this.dropForeignKeyIfExists(queryRunner, 'notifications', 'task_id');
 

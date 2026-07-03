@@ -19,4 +19,10 @@ export class AuthController {
   me(@CurrentUser() user: AuthenticatedUser) {
     return user;
   }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('logout')
+  logout(@CurrentUser() user: AuthenticatedUser) {
+    return this.authService.logout(user);
+  }
 }

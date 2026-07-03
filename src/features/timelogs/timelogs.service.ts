@@ -2,6 +2,8 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  OnModuleDestroy,
+  OnModuleInit,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -16,10 +18,14 @@ import {
   TaskTodoEntity,
   TimelogEntity,
 } from '../../database/entities';
+import { RealtimeService } from '../realtime/realtime.service';
 import { CreateTimelogRequest, UpdateTimelogRequest } from './dto';
 
 @Injectable()
-export class TimelogsService {
+export class TimelogsService implements OnModuleInit, OnModuleDestroy {
+  private readonly warningSentKeys = new Set<string>();
+  private monitorInterval?: NodeJS.Timeout;
+
   constructor(
     @InjectRepository(TimelogEntity)
     private readonly timelogsRepository: Repository<TimelogEntity>,
@@ -27,7 +33,21 @@ export class TimelogsService {
     private readonly taskTodosRepository: Repository<TaskTodoEntity>,
     @InjectRepository(TaskEntity)
     private readonly taskRepository: Repository<TaskEntity>,
+    private readonly realtimeService: RealtimeService,
   ) {}
+
+  onModuleInit() {
+    this.monitorInterval = setInterval(() => {
+      void this.emitEstimateAlerts();
+    }, 60_000);
+    void this.emitEstimateAlerts();
+  }
+
+  onModuleDestroy() {
+    if (this.monitorInterval) {
+      clearInterval(this.monitorInterval);
+    }
+  }
 
   async create(payload: CreateTimelogRequest) {
     const timelog = await this.timelogsRepository.save(
@@ -46,7 +66,11 @@ export class TimelogsService {
       .find({
         relations: {
           user: true,
-          taskTodo: { task: { user: true }, user: true },
+          taskTodo: {
+            task: { user: true },
+            user: true,
+            todoUsers: { user: true },
+          },
           files: true,
         },
         order: { id: 'DESC' },
@@ -65,7 +89,11 @@ export class TimelogsService {
       where: { id },
       relations: {
         user: true,
-        taskTodo: { task: { user: true }, user: true },
+        taskTodo: {
+          task: { user: true },
+          user: true,
+          todoUsers: { user: true },
+        },
         files: true,
       },
     });
@@ -195,7 +223,7 @@ export class TimelogsService {
       where: { task_todo_id: taskTodoId },
       order: { id: 'DESC' },
     });
-    const todoStatus = this.getTodoStatusFromTimelog(latestTimelog);
+    const todoStatus = this.getTodoStatusFromTimelog(latestTimelog, taskTodo);
     const todoProgress = this.getTodoProgress(todoStatus);
 
     await this.taskTodosRepository.update(taskTodoId, {
@@ -221,12 +249,19 @@ export class TimelogsService {
     await this.taskRepository.update(taskId, { progress });
   }
 
-  private getTodoStatusFromTimelog(timelog: TimelogEntity | null) {
+  private getTodoStatusFromTimelog(
+    timelog: TimelogEntity | null,
+    taskTodo?: TaskTodoEntity,
+  ) {
     if (!timelog) {
       return 'draft';
     }
 
     if (timelog.status === 'finish') {
+      if (taskTodo && this.isTimelogOverEstimate(timelog, taskTodo)) {
+        return 'completed_but_overdue';
+      }
+
       return 'complete';
     }
 
@@ -238,7 +273,7 @@ export class TimelogsService {
   }
 
   private getTodoProgress(status: string) {
-    if (status === 'complete') {
+    if (status === 'complete' || status === 'completed_but_overdue') {
       return 100;
     }
 
@@ -260,5 +295,99 @@ export class TimelogsService {
       ...timelog,
       timelog_file: timelog.files ?? [],
     } as T;
+  }
+
+  private async emitEstimateAlerts() {
+    const activeTimelogs = await this.timelogsRepository.find({
+      where: { status: 'active' },
+      relations: { taskTodo: { task: true } },
+    });
+    const now = new Date();
+
+    activeTimelogs.forEach((timelog) => {
+      const taskTodo = timelog.taskTodo;
+      if (!taskTodo?.estimate_time || !timelog.start) {
+        return;
+      }
+
+      const estimateMinutes = taskTodo.estimate_time * 60;
+      const elapsedMs = now.getTime() - new Date(timelog.start).getTime();
+      const elapsedMinutes = Math.floor(elapsedMs / 60_000);
+      const remainingMinutes = estimateMinutes - elapsedMinutes;
+      const basePayload = {
+        timelog_id: timelog.id,
+        user_id: timelog.user_id,
+        task_todo_id: taskTodo.id,
+        task_id: taskTodo.task_id,
+        task_title: taskTodo.task?.title ?? null,
+        todo_label: taskTodo.label,
+        estimate_time: taskTodo.estimate_time,
+        estimate_time_minutes: estimateMinutes,
+        estimate_time_label: this.formatEstimateTime(taskTodo.estimate_time),
+        elapsed_minutes: elapsedMinutes,
+      };
+
+      if (elapsedMs > estimateMinutes * 60_000) {
+        this.realtimeService.emitToUser(timelog.user_id, 'task_todo.overdue', {
+          ...basePayload,
+          title: 'Task Todo Overdue',
+          message: `Todo "${taskTodo.label}" sudah melewati estimate time.`,
+          overdue_minutes: elapsedMinutes - estimateMinutes,
+        });
+        return;
+      }
+
+      const warningKey = `${timelog.id}:10m`;
+      if (
+        remainingMinutes <= 10 &&
+        remainingMinutes > 0 &&
+        !this.warningSentKeys.has(warningKey)
+      ) {
+        this.warningSentKeys.add(warningKey);
+        this.realtimeService.emitToUser(
+          timelog.user_id,
+          'task_todo.overdue_warning',
+          {
+            ...basePayload,
+            title: 'Task Todo Almost Overdue',
+            message: `Todo "${taskTodo.label}" akan overdue dalam ${remainingMinutes} menit.`,
+            remaining_minutes: remainingMinutes,
+          },
+        );
+      }
+    });
+  }
+
+  private isTimelogOverEstimate(
+    timelog: TimelogEntity,
+    taskTodo: TaskTodoEntity,
+  ) {
+    if (!taskTodo.estimate_time || !timelog.start) {
+      return false;
+    }
+
+    const end = timelog.end ? new Date(timelog.end) : new Date();
+    const elapsedMs = end.getTime() - new Date(timelog.start).getTime();
+    return elapsedMs > taskTodo.estimate_time * 60 * 60_000;
+  }
+
+  private formatEstimateTime(hours?: number | null) {
+    if (hours === null || hours === undefined) {
+      return null;
+    }
+
+    const days = Math.floor(hours / 8);
+    const remainingHours = hours % 8;
+    const parts: string[] = [];
+
+    if (days > 0) {
+      parts.push(`${days}d`);
+    }
+
+    if (remainingHours > 0 || parts.length === 0) {
+      parts.push(`${remainingHours}h`);
+    }
+
+    return parts.join(' ');
   }
 }

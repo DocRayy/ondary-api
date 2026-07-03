@@ -10,6 +10,10 @@ import {
   isPasswordHashed,
   verifyPassword,
 } from '../../common/security/password.util';
+import {
+  publicMediaPath,
+  publicMediaUrl,
+} from '../../common/uploads/media-url.util';
 import { UsersService } from '../users/users.service';
 import { LoginRequest } from './dto/login.request';
 import { AuthenticatedUser } from './types/authenticated-user.type';
@@ -64,6 +68,8 @@ export class AuthService {
       name: user.name,
       role: user.role,
       status: user.status,
+      photo: publicMediaPath(user.photo),
+      photo_url: publicMediaUrl(user.photo),
     };
 
     return successResponse('Login Successful', 'Login successful', {
@@ -74,6 +80,14 @@ export class AuthService {
       token_type: 'Bearer',
       expires_in: this.configService.get<string>('JWT_EXPIRES_IN') ?? '1d',
       user: authUser,
+    });
+  }
+
+  logout(user: AuthenticatedUser) {
+    return successResponse('Logout Successful', 'Logout successful', {
+      user_id: user.id,
+      username: user.username,
+      user_role: user.role,
     });
   }
 }

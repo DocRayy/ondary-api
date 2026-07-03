@@ -5,6 +5,7 @@ import {
   TaskTodoEntity,
   TimelogEntity,
   UserEntity,
+  ProjectEntity,
 } from '../../database/entities';
 import { RealtimeModule } from '../realtime/realtime.module';
 import { TaskController } from './task.controller';
@@ -17,6 +18,7 @@ import { TaskService } from './task.service';
       TaskTodoEntity,
       TimelogEntity,
       UserEntity,
+      ProjectEntity,
     ]),
     RealtimeModule,
   ],

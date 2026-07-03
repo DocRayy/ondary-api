@@ -9,8 +9,10 @@ import {
 import { ProjectEntity } from './project.entity';
 import { ManagerNoteEntity } from './manager-note.entity';
 import { StickyNoteEntity } from './sticky-note.entity';
+import { TaskCommentEntity } from './task-comment.entity';
 import { TaskEntity } from './task.entity';
 import { TaskTodoEntity } from './task-todo.entity';
+import { TaskTodoUserEntity } from './task-todo-user.entity';
 import { TimelogEntity } from './timelog.entity';
 
 @Entity('users')
@@ -60,6 +62,9 @@ export class UserEntity {
   @OneToMany(() => TaskTodoEntity, (taskTodo) => taskTodo.user)
   taskTodos: TaskTodoEntity[];
 
+  @OneToMany(() => TaskTodoUserEntity, (assignment) => assignment.user)
+  taskTodoAssignments: TaskTodoUserEntity[];
+
   @OneToMany(() => TimelogEntity, (timelog) => timelog.user)
   timelogs: TimelogEntity[];
 
@@ -68,4 +73,7 @@ export class UserEntity {
 
   @OneToMany(() => ManagerNoteEntity, (managerNote) => managerNote.user)
   managerNotes: ManagerNoteEntity[];
+
+  @OneToMany(() => TaskCommentEntity, (taskComment) => taskComment.user)
+  taskComments: TaskCommentEntity[];
 }

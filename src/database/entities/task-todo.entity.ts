@@ -11,6 +11,7 @@ import {
 import { TaskEntity } from './task.entity';
 import { UserEntity } from './user.entity';
 import { TimelogEntity } from './timelog.entity';
+import { TaskTodoUserEntity } from './task-todo-user.entity';
 
 export type TaskTodoFileItem = {
   url?: string | null;
@@ -82,4 +83,7 @@ export class TaskTodoEntity {
 
   @OneToMany(() => TimelogEntity, (timelog) => timelog.taskTodo)
   timelogs: TimelogEntity[];
+
+  @OneToMany(() => TaskTodoUserEntity, (taskTodoUser) => taskTodoUser.taskTodo)
+  todoUsers: TaskTodoUserEntity[];
 }

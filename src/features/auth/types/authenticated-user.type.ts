@@ -5,4 +5,6 @@ export type AuthenticatedUser = {
   name: string;
   role: string;
   status: string;
+  photo?: string | null;
+  photo_url?: string | null;
 };

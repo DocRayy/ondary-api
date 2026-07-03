@@ -1,11 +1,25 @@
 import { Type } from 'class-transformer';
-import { IsInt, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+import {
+  IsBoolean,
+  IsInt,
+  IsOptional,
+  IsString,
+  MaxLength,
+  Min,
+  ValidateIf,
+} from 'class-validator';
 
 export class CreateManagerNoteRequest {
+  @ValidateIf((payload: CreateManagerNoteRequest) => !payload.send_to_all)
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  user_id: number;
+  user_id?: number;
+
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  send_to_all?: boolean;
 
   @IsString()
   @MaxLength(150)

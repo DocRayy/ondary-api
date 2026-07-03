@@ -1,5 +1,6 @@
 import {
   Column,
+  DeleteDateColumn,
   Entity,
   JoinColumn,
   ManyToOne,
@@ -20,6 +21,9 @@ export class ManagerNoteEntity {
 
   @Column({ type: 'text', nullable: true })
   description: string | null;
+
+  @DeleteDateColumn({ type: 'timestamp', nullable: true })
+  deleted_at: Date | null;
 
   @ManyToOne(() => UserEntity, (user) => user.managerNotes, {
     onDelete: 'CASCADE',

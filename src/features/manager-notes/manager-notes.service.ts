@@ -28,10 +28,28 @@ export class ManagerNotesService {
   ) {}
 
   async create(payload: CreateManagerNoteRequest) {
-    await this.validateRecipientUser(payload.user_id);
+    if (payload.send_to_all) {
+      return this.createForAllRecipients(payload);
+    }
+
+    const userId = payload.user_id;
+    if (!userId) {
+      throw new BadRequestException(
+        errorResponse(
+          'Manager Note Recipient Required',
+          'user_id is required unless send_to_all is true',
+        ),
+      );
+    }
+
+    await this.validateRecipientUser(userId);
 
     const managerNote = await this.managerNotesRepository.save(
-      this.managerNotesRepository.create(payload),
+      this.managerNotesRepository.create({
+        user_id: userId,
+        title: payload.title,
+        description: payload.description,
+      }),
     );
     await this.notificationService.createForManagerNoteCreated(managerNote);
 
@@ -39,6 +57,44 @@ export class ManagerNotesService {
       'Manager Note Created',
       'Manager note created successfully',
       responseData(await this.findOne(managerNote.id)),
+    );
+  }
+
+  private async createForAllRecipients(payload: CreateManagerNoteRequest) {
+    const recipients = await this.usersRepository.find({
+      where: { role: In(MANAGER_NOTE_RECIPIENT_ROLES) },
+      select: { id: true },
+    });
+
+    if (recipients.length === 0) {
+      throw new BadRequestException(
+        errorResponse(
+          'Manager Note Recipients Not Found',
+          'No eligible manager note recipients were found',
+        ),
+      );
+    }
+
+    const managerNotes = await this.managerNotesRepository.save(
+      recipients.map((recipient) =>
+        this.managerNotesRepository.create({
+          user_id: recipient.id,
+          title: payload.title,
+          description: payload.description,
+        }),
+      ),
+    );
+
+    await Promise.all(
+      managerNotes.map((managerNote) =>
+        this.notificationService.createForManagerNoteCreated(managerNote),
+      ),
+    );
+
+    return successResponse(
+      'Manager Notes Created',
+      'Manager notes created successfully for all recipients',
+      removePasswords(managerNotes),
     );
   }
 
@@ -119,7 +175,7 @@ export class ManagerNotesService {
 
   async remove(id: number) {
     const managerNote = responseData(await this.findOne(id));
-    await this.managerNotesRepository.remove(managerNote);
+    await this.managerNotesRepository.softRemove(managerNote);
     return successResponse(
       'Manager Note Deleted',
       'Manager note deleted successfully',

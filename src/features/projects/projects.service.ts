@@ -7,6 +7,7 @@ import {
   successResponse,
 } from '../../common/responses/api-response.util';
 import { removePasswords } from '../../common/serialization/remove-passwords.util';
+import { withPhotoUrl } from '../../common/uploads/media-url.util';
 import {
   uploadedPhotoUrl,
   UploadedPhoto,
@@ -48,7 +49,7 @@ export class ProjectsService {
         successResponse(
           'Projects Retrieved',
           'Projects retrieved successfully',
-          this.withTaskIds(removePasswords(projects)),
+          withPhotoUrl(this.withTaskIds(removePasswords(projects))),
         ),
       );
   }
@@ -70,7 +71,7 @@ export class ProjectsService {
     return successResponse(
       'Project Retrieved',
       'Project retrieved successfully',
-      this.withTaskIds(removePasswords(project)),
+      withPhotoUrl(this.withTaskIds(removePasswords(project))),
     );
   }
 

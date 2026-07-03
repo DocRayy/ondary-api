@@ -10,18 +10,31 @@ export type TaskReportRow = {
   project: string;
   timeSpendMinutes: number;
   createdAt: string;
+  groupMonth: string;
   groupWeek: number;
   groupDay: string;
 };
 
 export type TaskReportPdfData = {
-  month: number;
+  month: number | null;
   year: number;
-  monthName: string;
+  monthName: string | null;
+  periodLabel: string;
+  filterSummary: {
+    month: string;
+    year: string;
+    project: string;
+    user: string;
+    type: string;
+  };
   totalTimeSpendMinutes: number;
   totalTodos: number;
   totalProjects: number;
   totalCompleted: number;
+  performanceTitle: string;
+  performanceSubtitle: string;
+  performanceScore: number;
+  groupByMonth: boolean;
   rows: TaskReportRow[];
 };
 
@@ -44,8 +57,102 @@ export function normalizeReportMonth(month?: string, year?: string) {
     month: selectedMonth,
     year: selectedYear,
     monthName: startDate.toLocaleString('en-US', { month: 'long' }),
+    periodLabel: `${startDate.toLocaleString('en-US', { month: 'long' })} ${selectedYear}`,
     startDate,
     endDate,
+  };
+}
+
+export function normalizeReportPeriod(month?: string, year?: string) {
+  const parsedMonth = Number(month);
+  const parsedYear = Number(year);
+  const hasValidMonth =
+    Number.isInteger(parsedMonth) && parsedMonth >= 1 && parsedMonth <= 12;
+  const hasValidYear = Number.isInteger(parsedYear) && parsedYear > 1900;
+
+  if (!hasValidMonth && hasValidYear) {
+    const startDate = new Date(parsedYear, 0, 1, 0, 0, 0, 0);
+    const endDate = new Date(parsedYear + 1, 0, 1, 0, 0, 0, 0);
+
+    return {
+      month: null,
+      year: parsedYear,
+      monthName: null,
+      periodLabel: String(parsedYear),
+      startDate,
+      endDate,
+    };
+  }
+
+  return normalizeReportMonth(month, year);
+}
+
+export function calculateTaskReportPerformance(data: {
+  totalTimeSpendMinutes: number;
+  totalTodos: number;
+  totalProjects: number;
+  totalCompleted: number;
+}) {
+  if (
+    data.totalTimeSpendMinutes <= 0 &&
+    data.totalTodos <= 0 &&
+    data.totalProjects <= 0 &&
+    data.totalCompleted <= 0
+  ) {
+    return {
+      title: 'No Activity',
+      subtitle: 'No report data found',
+      score: 0,
+    };
+  }
+
+  const completionRate =
+    data.totalTodos > 0 ? data.totalCompleted / data.totalTodos : 0;
+  const timeHours = data.totalTimeSpendMinutes / 60;
+  const timeScore = Math.min(40, (timeHours / 160) * 40);
+  const todoScore = Math.min(25, (data.totalTodos / 40) * 25);
+  const projectScore = Math.min(15, (data.totalProjects / 5) * 15);
+  const completionScore = Math.min(20, completionRate * 20);
+  const score = Math.round(
+    timeScore + todoScore + projectScore + completionScore,
+  );
+
+  if (score >= 80) {
+    return {
+      title: 'Excellent Work',
+      subtitle: 'Outstanding monthly performance',
+      score,
+    };
+  }
+
+  if (score >= 60) {
+    return {
+      title: 'Great Progress',
+      subtitle: 'Strong and consistent output',
+      score,
+    };
+  }
+
+  if (score >= 40) {
+    return {
+      title: 'Good Effort',
+      subtitle: 'Solid activity with room to grow',
+      score,
+    };
+  }
+
+  if (score >= 20) {
+    return {
+      title: 'Keep Improving',
+      subtitle: 'More completed work is needed',
+      score,
+    };
+  }
+
+  return {
+    title: 'Needs Attention',
+    subtitle: 'Low report activity this period',
+    score,
   };
 }
 
@@ -62,9 +169,17 @@ export function taskGeneratehtml(data: TaskReportPdfData) {
     .flatMap((row, index, rows) => {
       const groupHeader =
         index === 0 ||
+        (data.groupByMonth && rows[index - 1].groupMonth !== row.groupMonth) ||
         rows[index - 1].groupWeek !== row.groupWeek ||
         rows[index - 1].groupDay !== row.groupDay
           ? [
+              data.groupByMonth &&
+              (index === 0 || rows[index - 1].groupMonth !== row.groupMonth)
+                ? `
+        <tr class="month-row">
+          <td colspan="7">${escapeHtml(row.groupMonth)}</td>
+        </tr>`
+                : '',
               `
         <tr class="group-row">
           <td colspan="7">Week ${row.groupWeek} - ${escapeHtml(row.groupDay)}</td>
@@ -73,7 +188,7 @@ export function taskGeneratehtml(data: TaskReportPdfData) {
           : [];
 
       return [
-        ...groupHeader,
+        ...groupHeader.filter(Boolean),
         `
         <tr>
           <td>${escapeHtml(row.assignee)} &gt; ${escapeHtml(row.todo)}</td>
@@ -96,6 +211,7 @@ export function taskGeneratehtml(data: TaskReportPdfData) {
       table { width: 100%; border-collapse: collapse; margin-top: 20px; }
       th { border-bottom: 1px solid #111; padding: 8px; text-align: left; }
       td { padding: 8px; font-weight: 700; }
+      .month-row td { background: #d8d8d8; font-size: 13px; }
       .group-row td { background: #eeeeee; font-size: 12px; }
     </style>
     <section class="summary">
@@ -103,13 +219,21 @@ export function taskGeneratehtml(data: TaskReportPdfData) {
         <b>Total Time Spend</b>
         <h1>${formatReportDuration(data.totalTimeSpendMinutes)}</h1>
         <small>Total of ${data.totalProjects} Projects</small>
+        <small>Month: ${escapeHtml(data.filterSummary.month)}</small>
+        <small>Year: ${escapeHtml(data.filterSummary.year)}</small>
+        <small>Project: ${escapeHtml(data.filterSummary.project)}</small>
+        <small>User: ${escapeHtml(data.filterSummary.user)}</small>
+        <small>Type: ${escapeHtml(data.filterSummary.type)}</small>
       </div>
       <div>
         <div class="card"><b>${data.totalTodos}</b> Todos</div>
         <div class="card"><b>${data.totalProjects}</b> Projects</div>
         <div class="card"><b>${data.totalCompleted}</b> Completed</div>
       </div>
-      <div class="card"><h2>Excellent<br />Work</h2></div>
+      <div class="card">
+        <h2>${escapeHtml(data.performanceTitle).replace(' ', '<br />')}</h2>
+        <small>${escapeHtml(data.performanceSubtitle)} (${data.performanceScore})</small>
+      </div>
     </section>
     <table>
       <thead>
@@ -168,7 +292,7 @@ function drawSummary(
   cardColor: string,
 ) {
   const cardY = 20;
-  const cardHeight = 80;
+  const cardHeight = 106;
   const firstWidth = 360;
   const secondX = margin + firstWidth + 10;
   const secondWidth = 170;
@@ -195,11 +319,24 @@ function drawSummary(
     .text(
       formatReportDuration(data.totalTimeSpendMinutes),
       margin + 75,
-      cardY + 40,
+      cardY + 31,
     )
     .fontSize(8)
     .font('Helvetica-Oblique')
-    .text(`Total of ${data.totalProjects} Projects`, margin + 75, cardY + 63);
+    .text(`Total of ${data.totalProjects} Projects`, margin + 75, cardY + 53)
+    .font('Helvetica')
+    .fontSize(6.5)
+    .text(`Month: ${data.filterSummary.month}`, margin + 75, cardY + 66)
+    .text(`Year: ${data.filterSummary.year}`, margin + 180, cardY + 66)
+    .text(`Project: ${data.filterSummary.project}`, margin + 75, cardY + 78, {
+      width: 130,
+    })
+    .text(`User: ${data.filterSummary.user}`, margin + 210, cardY + 78, {
+      width: 130,
+    })
+    .text(`Type: ${data.filterSummary.type}`, margin + 75, cardY + 92, {
+      width: 260,
+    });
 
   const statRows = [
     [data.totalTodos, 'Todos'],
@@ -218,12 +355,37 @@ function drawSummary(
   });
 
   doc.roundedRect(thirdX, cardY, thirdWidth, 54, 8).fill(cardColor);
+  const titleParts = data.performanceTitle.split(' ');
   doc
     .fillColor('#000000')
     .font('Helvetica-Bold')
     .fontSize(17)
-    .text('Excellent', thirdX + 95, cardY + 14)
-    .text('Work', thirdX + 95, cardY + 35);
+    .text(
+      titleParts.slice(0, -1).join(' ') || data.performanceTitle,
+      thirdX + 95,
+      cardY + 12,
+      {
+        width: thirdWidth - 105,
+      },
+    )
+    .text(
+      titleParts.length > 1 ? titleParts[titleParts.length - 1] : '',
+      thirdX + 95,
+      cardY + 32,
+      {
+        width: thirdWidth - 105,
+      },
+    )
+    .fontSize(7)
+    .font('Helvetica')
+    .text(
+      `${data.performanceSubtitle} (${data.performanceScore})`,
+      thirdX + 95,
+      cardY + 51,
+      {
+        width: thirdWidth - 105,
+      },
+    );
   doc
     .lineWidth(2)
     .path(
@@ -278,17 +440,33 @@ function drawTable(
     const previousRow = data.rows[index - 1];
     const shouldDrawGroup =
       !previousRow ||
+      (data.groupByMonth && previousRow.groupMonth !== row.groupMonth) ||
       previousRow.groupWeek !== row.groupWeek ||
       previousRow.groupDay !== row.groupDay;
 
     if (shouldDrawGroup) {
+      if (
+        data.groupByMonth &&
+        (!previousRow || previousRow.groupMonth !== row.groupMonth)
+      ) {
+        ensurePageSpace(60);
+        doc
+          .roundedRect(margin, y - 6, doc.page.width - margin * 2, 22, 4)
+          .fill('#d8d8d8')
+          .fillColor('#000000')
+          .font('Helvetica-Bold')
+          .fontSize(9)
+          .text(row.groupMonth, margin + 8, y);
+        y += 27;
+      }
+
       ensurePageSpace(45);
       doc
         .roundedRect(margin, y - 5, doc.page.width - margin * 2, 18, 4)
         .fill('#eeeeee')
         .fillColor('#000000')
-        .font('Helvetica-Bold')
-        .fontSize(8)
+        .font('Helvetica')
+        .fontSize(7.5)
         .text(`Week ${row.groupWeek} - ${row.groupDay}`, margin + 8, y);
       y += 24;
     }

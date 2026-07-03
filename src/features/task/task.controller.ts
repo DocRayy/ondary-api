@@ -40,14 +40,26 @@ export class TaskController {
     return this.taskService.findAll(query);
   }
 
+  @UseGuards(JwtAuthGuard)
   @Get('report/pdf')
   async pdf(
     @Res() res,
+    @CurrentUser() user: AuthenticatedUser,
     @Query('month') month?: string,
     @Query('year') year?: string,
     @Query('type') type?: string,
+    @Query('status') status?: string,
+    @Query('user_id') userId?: string,
+    @Query('project_id') projectId?: string,
   ) {
-    return this.taskService.generateTaskReport(res, { month, year, type });
+    return this.taskService.generateTaskReport(res, {
+      month,
+      year,
+      type: type ?? status,
+      user_id: userId,
+      project_id: projectId,
+      current_user: user,
+    });
   }
 
   @Get(':id')

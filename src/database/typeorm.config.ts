@@ -16,6 +16,11 @@ import { TaskProgress1712920000009 } from './migrations/1712920000009-task-progr
 import { UploadPhotoAndProjectTimestamps1712920000010 } from './migrations/1712920000010-upload-photo-and-project-timestamps';
 import { TimelogTimestamps1712920000011 } from './migrations/1712920000011-timelog-timestamps';
 import { GeneralNotifications1712920000012 } from './migrations/1712920000012-general-notifications';
+import { TaskAttachmentsComments1712920000013 } from './migrations/1712920000013-task-attachments-comments';
+import { TaskTodoEstimatesUsers1712920000014 } from './migrations/1712920000014-task-todo-estimates-users';
+import { AuditLogs1712920000015 } from './migrations/1712920000015-audit-logs';
+import { AuditLogDiffColumns1712920000016 } from './migrations/1712920000016-audit-log-diff-columns';
+import { ManagerNotesSoftDelete1712920000017 } from './migrations/1712920000017-manager-notes-soft-delete';
 
 loadEnv();
 
@@ -58,6 +63,11 @@ export const typeOrmOptions: TypeOrmModuleOptions = {
     UploadPhotoAndProjectTimestamps1712920000010,
     TimelogTimestamps1712920000011,
     GeneralNotifications1712920000012,
+    TaskAttachmentsComments1712920000013,
+    TaskTodoEstimatesUsers1712920000014,
+    AuditLogs1712920000015,
+    AuditLogDiffColumns1712920000016,
+    ManagerNotesSoftDelete1712920000017,
   ],
   synchronize: process.env.DB_SYNCHRONIZE === 'true',
   logging: process.env.DB_LOGGING === 'true',

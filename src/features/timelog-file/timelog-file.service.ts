@@ -7,6 +7,7 @@ import {
   successResponse,
 } from '../../common/responses/api-response.util';
 import { removePasswords } from '../../common/serialization/remove-passwords.util';
+import { withPhotoUrl } from '../../common/uploads/media-url.util';
 import {
   uploadedPhotoPath,
   uploadedPhotoUrl,
@@ -50,7 +51,7 @@ export class TimelogFileService {
         successResponse(
           'Timelog Files Retrieved',
           'Timelog files retrieved successfully',
-          removePasswords(timelogFiles),
+          withPhotoUrl(removePasswords(timelogFiles)),
         ),
       );
   }
@@ -72,7 +73,7 @@ export class TimelogFileService {
     return successResponse(
       'Timelog File Retrieved',
       'Timelog file retrieved successfully',
-      removePasswords(timelogFile),
+      withPhotoUrl(removePasswords(timelogFile)),
     );
   }
 

@@ -21,6 +21,10 @@ export class CreateTaskTodoRequest {
   @Min(1)
   user_id?: number;
 
+  @IsOptional()
+  @IsArray()
+  user_ids?: number[];
+
   @IsString()
   @MaxLength(150)
   label: string;
@@ -73,6 +77,10 @@ export class UpdateTaskTodoRequest {
   @IsInt()
   @Min(1)
   user_id?: number;
+
+  @IsOptional()
+  @IsArray()
+  user_ids?: number[];
 
   @IsOptional()
   @IsString()

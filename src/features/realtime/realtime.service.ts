@@ -21,6 +21,10 @@ export class RealtimeService {
     this.server?.emit(event, payload);
   }
 
+  emitAuditLog(payload: unknown) {
+    this.server?.emit('audit-log.created', payload);
+  }
+
   projectRoom(projectId: number) {
     return `project:${projectId}`;
   }

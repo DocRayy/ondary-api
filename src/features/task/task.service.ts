@@ -9,15 +9,18 @@ import {
   successResponse,
 } from '../../common/responses/api-response.util';
 import { removePasswords } from '../../common/serialization/remove-passwords.util';
+import { withPhotoUrl } from '../../common/uploads/media-url.util';
 import {
+  ProjectEntity,
   TaskEntity,
   TaskTodoEntity,
   TimelogEntity,
   UserEntity,
 } from '../../database/entities';
 import {
+  calculateTaskReportPerformance,
   generatePdf,
-  normalizeReportMonth,
+  normalizeReportPeriod,
   type TaskReportPdfData,
   type TaskReportRow,
 } from '../../cores/helpers/pdf-helper';
@@ -34,6 +37,11 @@ import {
   MoveTaskRequest,
   UpdateTaskRequest,
 } from './dto';
+import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
+
+type ReportPeriod = ReturnType<typeof normalizeReportPeriod> & {
+  hasMonthFilter: boolean;
+};
 
 @Injectable()
 export class TaskService {
@@ -46,6 +54,8 @@ export class TaskService {
     private readonly timelogsRepository: Repository<TimelogEntity>,
     @InjectRepository(UserEntity)
     private readonly userRepository: Repository<UserEntity>,
+    @InjectRepository(ProjectEntity)
+    private readonly projectRepository: Repository<ProjectEntity>,
     private readonly dataSource: DataSource,
     private readonly realtimeService: RealtimeService,
     private readonly eventEmitter: EventEmitter2,
@@ -82,7 +92,7 @@ export class TaskService {
     return successResponse(
       'Task Created',
       'Task created successfully',
-      removePasswords(taskWithAssignees),
+      withPhotoUrl(removePasswords(taskWithAssignees)),
     );
   }
 
@@ -94,6 +104,7 @@ export class TaskService {
       .leftJoinAndSelect('task.createdBy', 'createdBy')
       .leftJoinAndSelect('task.updatedBy', 'updatedBy')
       .leftJoinAndSelect('task.taskTodo', 'taskTodo')
+      .leftJoinAndSelect('task.attachments', 'attachments')
       .orderBy('task.order_index', 'ASC')
       .addOrderBy('task.id', 'DESC');
 
@@ -117,7 +128,7 @@ export class TaskService {
     }
 
     if (filters.month || filters.year) {
-      const reportMonth = normalizeReportMonth(
+      const reportPeriod = normalizeReportPeriod(
         filters.month?.toString(),
         filters.year?.toString(),
       );
@@ -131,16 +142,26 @@ export class TaskService {
           OR (task.moved_at >= :startDate AND task.moved_at < :endDate)
         )`,
         {
-          startDate: reportMonth.startDate,
-          endDate: reportMonth.endDate,
+          startDate: reportPeriod.startDate,
+          endDate: reportPeriod.endDate,
         },
       );
+    }
+
+    if (filters.recently_updated_days) {
+      const sinceDate = new Date();
+      sinceDate.setDate(sinceDate.getDate() - filters.recently_updated_days);
+      query.andWhere('task.moved_at >= :recentlyUpdatedSince', {
+        recentlyUpdatedSince: sinceDate,
+      });
     }
 
     return successResponse(
       'Tasks Retrieved',
       'Tasks retrieved successfully',
-      removePasswords(await this.attachAssigneeUsers(await query.getMany())),
+      withPhotoUrl(
+        removePasswords(await this.attachAssigneeUsers(await query.getMany())),
+      ),
     );
   }
 
@@ -154,6 +175,12 @@ export class TaskService {
         updatedBy: true,
         taskTodo: { user: true },
         todos: { user: true, createdBy: true, updatedBy: true },
+        attachments: true,
+        comments: { user: true },
+      },
+      order: {
+        attachments: { id: 'DESC' },
+        comments: { created_at: 'ASC', id: 'ASC' },
       },
     });
     if (!task) {
@@ -165,32 +192,62 @@ export class TaskService {
     return successResponse(
       'Task Retrieved',
       'Task retrieved successfully',
-      removePasswords(await this.attachAssigneeUsers(task)),
+      withPhotoUrl(removePasswords(await this.attachAssigneeUsers(task))),
     );
   }
 
   async generateTaskReport(
     res: Response,
-    filters: { month?: string; year?: string; type?: string },
+    filters: {
+      month?: string;
+      year?: string;
+      type?: string;
+      user_id?: string;
+      project_id?: string;
+      current_user: AuthenticatedUser;
+    },
   ) {
-    const reportMonth = normalizeReportMonth(filters.month, filters.year);
+    const reportPeriod = this.normalizePdfReportPeriod(
+      filters.month,
+      filters.year,
+    );
+    const requestedUserId = Number(filters.user_id);
+    const canReadAllReports = this.canReadAllReports(filters.current_user);
+    const userId =
+      canReadAllReports &&
+      Number.isInteger(requestedUserId) &&
+      requestedUserId > 0
+        ? requestedUserId
+        : canReadAllReports
+          ? null
+          : filters.current_user.id;
+    const hasUserFilter = Number.isInteger(userId) && Number(userId) > 0;
+    const projectId = Number(filters.project_id);
+    const hasProjectFilter = Number.isInteger(projectId) && projectId > 0;
+    const type = this.normalizeReportType(filters.type);
     const taskTodos = await this.taskTodosRepository
       .createQueryBuilder('todo')
       .leftJoinAndSelect('todo.user', 'todoUser')
+      .leftJoinAndSelect('todo.todoUsers', 'todoAssignment')
+      .leftJoinAndSelect('todoAssignment.user', 'assignedTodoUser')
       .leftJoinAndSelect('todo.task', 'task')
       .leftJoinAndSelect('task.project', 'project')
       .leftJoinAndSelect(
         'todo.timelogs',
         'timelog',
         `(
-          (timelog.start >= :startDate AND timelog.start < :endDate)
-          OR (timelog.end >= :startDate AND timelog.end < :endDate)
-          OR (timelog.created_at >= :startDate AND timelog.created_at < :endDate)
-          OR (timelog.updated_at >= :startDate AND timelog.updated_at < :endDate)
+          (
+            (timelog.start >= :startDate AND timelog.start < :endDate)
+            OR (timelog.end >= :startDate AND timelog.end < :endDate)
+            OR (timelog.created_at >= :startDate AND timelog.created_at < :endDate)
+            OR (timelog.updated_at >= :startDate AND timelog.updated_at < :endDate)
+          )
+          AND (:reportUserId IS NULL OR timelog.user_id = :reportUserId)
         )`,
         {
-          startDate: reportMonth.startDate,
-          endDate: reportMonth.endDate,
+          startDate: reportPeriod.startDate,
+          endDate: reportPeriod.endDate,
+          reportUserId: hasUserFilter ? userId : null,
         },
       )
       .where(
@@ -201,18 +258,33 @@ export class TaskService {
           OR timelog.id IS NOT NULL
         )`,
         {
-          startDate: reportMonth.startDate,
-          endDate: reportMonth.endDate,
+          startDate: reportPeriod.startDate,
+          endDate: reportPeriod.endDate,
         },
       )
       .orderBy('todo.created_at', 'DESC')
       .addOrderBy('todo.id', 'DESC');
 
-    if (filters.type) {
+    if (type) {
       taskTodos.andWhere(
         '(todo.status = :type OR task.status = :type OR task.board_column = :type)',
-        { type: filters.type },
+        { type },
       );
+    }
+
+    if (hasUserFilter) {
+      taskTodos.andWhere(
+        `(
+          todo.user_id = :userId
+          OR todoAssignment.user_id = :userId
+          OR timelog.user_id = :userId
+        )`,
+        { userId },
+      );
+    }
+
+    if (hasProjectFilter) {
+      taskTodos.andWhere('task.project_id = :projectId', { projectId });
     }
 
     const timelogs = this.timelogsRepository
@@ -227,25 +299,45 @@ export class TaskService {
           OR (timelog.updated_at >= :startDate AND timelog.updated_at < :endDate)
         )`,
         {
-          startDate: reportMonth.startDate,
-          endDate: reportMonth.endDate,
+          startDate: reportPeriod.startDate,
+          endDate: reportPeriod.endDate,
         },
       )
       .orderBy('timelog.created_at', 'DESC')
       .addOrderBy('timelog.id', 'DESC');
 
-    if (filters.type) {
-      timelogs.andWhere('timelog.status = :type', { type: filters.type });
+    if (type) {
+      timelogs.andWhere('timelog.status = :type', { type });
+    }
+
+    if (hasUserFilter) {
+      timelogs.andWhere('timelog.user_id = :userId', { userId });
+    }
+
+    if (hasProjectFilter) {
+      timelogs.andWhere('1 = 0');
     }
 
     const data = this.buildTaskReportData(
       await taskTodos.getMany(),
-      reportMonth,
+      reportPeriod,
       await timelogs.getMany(),
+      await this.buildReportFilterSummary({
+        reportPeriod,
+        hasMonthFilter: reportPeriod.hasMonthFilter,
+        projectId: hasProjectFilter ? projectId : null,
+        userId: hasUserFilter ? Number(userId) : null,
+        currentUser: filters.current_user,
+        canReadAllReports,
+        type,
+      }),
     );
-    const filename = `task-report-${reportMonth.year}-${String(
-      reportMonth.month,
-    ).padStart(2, '0')}.pdf`;
+    const filenameMonth = reportPeriod.month
+      ? `-${String(reportPeriod.month).padStart(2, '0')}`
+      : '';
+    const filenameUser = hasUserFilter ? `-user-${userId}` : '';
+    const filenameProject = hasProjectFilter ? `-project-${projectId}` : '';
+    const filename = `task-report-${reportPeriod.year}${filenameMonth}${filenameUser}${filenameProject}.pdf`;
 
     return generatePdf(res, data, filename);
   }
@@ -261,6 +353,9 @@ export class TaskService {
           : this.normalizeUserIds(payload.assignee_user_ids),
       ...(payload.status && !payload.board_column
         ? { board_column: payload.status }
+        : {}),
+      ...(payload.status && payload.status !== currentTask.status
+        ? { moved_at: new Date() }
         : {}),
       ...(payload.status === 'completed' && !payload.completed_at
         ? { completed_at: new Date() }
@@ -283,7 +378,7 @@ export class TaskService {
     return successResponse(
       'Task Updated',
       'Task updated successfully',
-      removePasswords(taskWithAssignees),
+      withPhotoUrl(removePasswords(taskWithAssignees)),
     );
   }
 
@@ -349,7 +444,7 @@ export class TaskService {
     return successResponse(
       'Task Moved',
       'Task moved successfully',
-      removePasswords(movedTaskWithAssignees),
+      withPhotoUrl(removePasswords(movedTaskWithAssignees)),
     );
   }
 
@@ -389,6 +484,51 @@ export class TaskService {
       current_status: savedTask.status,
       updated_by: updatedBy,
     } satisfies TaskStatusUpdatedEvent);
+  }
+
+  private canReadAllReports(user: AuthenticatedUser) {
+    return user.role === 'manager' || user.role === 'admin';
+  }
+
+  private normalizePdfReportPeriod(
+    month?: string,
+    year?: string,
+  ): ReportPeriod {
+    const parsedMonth = Number(month);
+    const parsedYear = Number(year);
+    const hasMonthFilter =
+      month !== undefined &&
+      month !== '' &&
+      !['all', 'all_months', 'all-months', 'all months'].includes(
+        month.trim().toLowerCase(),
+      ) &&
+      Number.isInteger(parsedMonth) &&
+      parsedMonth >= 1 &&
+      parsedMonth <= 12;
+    const selectedYear =
+      Number.isInteger(parsedYear) && parsedYear > 1900
+        ? parsedYear
+        : new Date().getFullYear();
+
+    if (hasMonthFilter) {
+      return {
+        ...normalizeReportPeriod(String(parsedMonth), String(selectedYear)),
+        hasMonthFilter: true,
+      };
+    }
+
+    const startDate = new Date(selectedYear, 0, 1, 0, 0, 0, 0);
+    const endDate = new Date(selectedYear + 1, 0, 1, 0, 0, 0, 0);
+
+    return {
+      month: null,
+      year: selectedYear,
+      monthName: null,
+      periodLabel: String(selectedYear),
+      startDate,
+      endDate,
+      hasMonthFilter: false,
+    };
   }
 
   private async attachAssigneeUsers(task: TaskEntity): Promise<TaskEntity>;
@@ -457,22 +597,23 @@ export class TaskService {
 
   private buildTaskReportData(
     taskTodos: TaskTodoEntity[],
-    reportMonth: ReturnType<typeof normalizeReportMonth>,
+    reportPeriod: ReportPeriod,
     timelogs: TimelogEntity[] = [],
+    filterSummary: TaskReportPdfData['filterSummary'],
   ): TaskReportPdfData {
     const rows = [
       ...taskTodos.map((todo) =>
         this.buildTodoReportRow(
           todo,
-          reportMonth.startDate,
-          reportMonth.endDate,
+          reportPeriod.startDate,
+          reportPeriod.endDate,
         ),
       ),
       ...timelogs.map((timelog) =>
         this.buildTimelogReportRow(
           timelog,
-          reportMonth.startDate,
-          reportMonth.endDate,
+          reportPeriod.startDate,
+          reportPeriod.endDate,
         ),
       ),
     ].sort(
@@ -483,23 +624,91 @@ export class TaskService {
     const projectNames = new Set(
       reportRows.map((row) => row.project).filter((project) => project !== '-'),
     );
+    const totalTimeSpendMinutes = reportRows.reduce(
+      (total, row) => total + row.timeSpendMinutes,
+      0,
+    );
+    const totalTodos = reportRows.length;
+    const totalProjects = projectNames.size;
+    const totalCompleted = reportRows.reduce(
+      (total, row) => total + row.completed,
+      0,
+    );
+    const performance = calculateTaskReportPerformance({
+      totalTimeSpendMinutes,
+      totalTodos,
+      totalProjects,
+      totalCompleted,
+    });
 
     return {
-      month: reportMonth.month,
-      year: reportMonth.year,
-      monthName: reportMonth.monthName,
-      totalTimeSpendMinutes: reportRows.reduce(
-        (total, row) => total + row.timeSpendMinutes,
-        0,
-      ),
-      totalTodos: reportRows.length,
-      totalProjects: projectNames.size,
-      totalCompleted: reportRows.reduce(
-        (total, row) => total + row.completed,
-        0,
-      ),
+      month: reportPeriod.month,
+      year: reportPeriod.year,
+      monthName: reportPeriod.monthName,
+      periodLabel: reportPeriod.periodLabel,
+      filterSummary,
+      totalTimeSpendMinutes,
+      totalTodos,
+      totalProjects,
+      totalCompleted,
+      performanceTitle: performance.title,
+      performanceSubtitle: performance.subtitle,
+      performanceScore: performance.score,
+      groupByMonth: !reportPeriod.hasMonthFilter,
       rows: reportRows,
     };
+  }
+
+  private async buildReportFilterSummary(filters: {
+    reportPeriod: ReportPeriod;
+    hasMonthFilter: boolean;
+    projectId: number | null;
+    userId: number | null;
+    currentUser: AuthenticatedUser;
+    canReadAllReports: boolean;
+    type: string | null;
+  }): Promise<TaskReportPdfData['filterSummary']> {
+    const [project, selectedUser] = await Promise.all([
+      filters.projectId
+        ? this.projectRepository.findOne({ where: { id: filters.projectId } })
+        : Promise.resolve(null),
+      filters.userId
+        ? this.userRepository.findOne({ where: { id: filters.userId } })
+        : Promise.resolve(null),
+    ]);
+
+    return {
+      month: filters.hasMonthFilter
+        ? (filters.reportPeriod.monthName ?? 'All Months')
+        : 'All Months',
+      year: String(filters.reportPeriod.year),
+      project: project?.label ?? 'All Projects',
+      user: filters.userId
+        ? this.getUserDisplayName(selectedUser)
+        : filters.canReadAllReports
+          ? 'All Users'
+          : this.getUserDisplayName(filters.currentUser),
+      type: filters.type ? this.formatReportType(filters.type) : 'All Types',
+    };
+  }
+
+  private normalizeReportType(value?: string) {
+    const type = value?.trim();
+    return type ? type : null;
+  }
+
+  private formatReportType(value: string) {
+    return value
+      .split(/[_\s-]+/)
+      .filter(Boolean)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(' ');
+  }
+
+  private getUserDisplayName(
+    user: Pick<UserEntity, 'name' | 'username'> | AuthenticatedUser | null,
+  ) {
+    return user?.name || user?.username || 'Unknown User';
   }
 
   private buildTodoReportRow(
@@ -516,10 +725,16 @@ export class TaskService {
     const isCompleted =
       this.isDateInRange(completedDate, startDate, endDate) &&
       (todo.progress >= 100 ||
-        ['finish', 'finished', 'completed'].includes(todo.status));
+        [
+          'finish',
+          'finished',
+          'complete',
+          'completed',
+          'completed_but_overdue',
+        ].includes(todo.status));
 
     return {
-      assignee: todo.user?.name || todo.user?.username || 'Unassigned',
+      assignee: this.getTodoAssigneeLabel(todo),
       todo: todo.label,
       status: todo.status,
       created: this.isDateInRange(todo.created_at, startDate, endDate) ? 1 : 0,
@@ -527,10 +742,27 @@ export class TaskService {
       project: todo.task?.project?.label ?? '-',
       timeSpendMinutes,
       createdAt: this.formatReportDateTime(todo.created_at),
+      groupMonth: this.formatReportMonth(reportDate),
       groupWeek: this.getWeekOfMonth(reportDate),
       groupDay: this.formatReportDay(reportDate),
       reportDate,
     };
+  }
+
+  private getTodoAssigneeLabel(todo: TaskTodoEntity) {
+    const assignedUsers =
+      todo.todoUsers
+        ?.map((assignment) => assignment.user)
+        .filter((user): user is UserEntity => Boolean(user)) ?? [];
+
+    if (assignedUsers.length > 0) {
+      return assignedUsers
+        .map((user) => user.name || user.username)
+        .filter(Boolean)
+        .join(', ');
+    }
+
+    return todo.user?.name || todo.user?.username || 'Unassigned';
   }
 
   private buildTimelogReportRow(
@@ -555,6 +787,7 @@ export class TaskService {
       project: '-',
       timeSpendMinutes: this.getTimelogMinutes(timelog),
       createdAt: this.formatReportDateTime(timelog.created_at),
+      groupMonth: this.formatReportMonth(reportDate),
       groupWeek: this.getWeekOfMonth(reportDate),
       groupDay: this.formatReportDay(reportDate),
       reportDate,
@@ -651,6 +884,13 @@ export class TaskService {
 
   private getWeekOfMonth(date: Date) {
     return Math.ceil(date.getDate() / 7);
+  }
+
+  private formatReportMonth(date: Date) {
+    return date.toLocaleDateString('en-US', {
+      month: 'long',
+      year: 'numeric',
+    });
   }
 
   private formatReportDay(date: Date) {

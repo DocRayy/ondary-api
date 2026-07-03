@@ -9,6 +9,8 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { ProjectEntity } from './project.entity';
+import { TaskAttachmentEntity } from './task-attachment.entity';
+import { TaskCommentEntity } from './task-comment.entity';
 import { TaskTodoEntity } from './task-todo.entity';
 import { UserEntity } from './user.entity';
 
@@ -132,4 +134,10 @@ export class TaskEntity {
 
   @OneToMany(() => TaskTodoEntity, (taskTodo) => taskTodo.task)
   todos: TaskTodoEntity[];
+
+  @OneToMany(() => TaskAttachmentEntity, (attachment) => attachment.task)
+  attachments: TaskAttachmentEntity[];
+
+  @OneToMany(() => TaskCommentEntity, (comment) => comment.task)
+  comments: TaskCommentEntity[];
 }
