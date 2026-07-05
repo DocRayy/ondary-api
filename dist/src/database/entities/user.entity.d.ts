@@ -1,0 +1,30 @@
+import { ProjectEntity } from './project.entity';
+import { ManagerNoteEntity } from './manager-note.entity';
+import { StickyNoteEntity } from './sticky-note.entity';
+import { TaskCommentEntity } from './task-comment.entity';
+import { TaskEntity } from './task.entity';
+import { TaskTodoEntity } from './task-todo.entity';
+import { TaskTodoUserEntity } from './task-todo-user.entity';
+import { TimelogEntity } from './timelog.entity';
+export declare class UserEntity {
+    id: number;
+    username: string;
+    email: string;
+    password: string;
+    name: string;
+    phone_no: string | null;
+    is_verified: boolean;
+    role: string;
+    status: string;
+    photo: string | null;
+    created_at: Date;
+    updated_at: Date;
+    projects: ProjectEntity[];
+    tasks: TaskEntity[];
+    taskTodos: TaskTodoEntity[];
+    taskTodoAssignments: TaskTodoUserEntity[];
+    timelogs: TimelogEntity[];
+    stickyNotes: StickyNoteEntity[];
+    managerNotes: ManagerNoteEntity[];
+    taskComments: TaskCommentEntity[];
+}
